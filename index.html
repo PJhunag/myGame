@@ -73,6 +73,15 @@ table.st td{padding:1px 3px;border-bottom:1px dotted #b8c4dd}
 .touch #log{width:270px;height:84px;font-size:13px}
 .touch #hud{width:230px}
 .touch input[type=checkbox]{width:18px;height:18px}
+
+#joy{display:none;position:absolute;left:34px;bottom:26px;width:150px;height:150px;border-radius:50%;background:radial-gradient(rgba(255,255,255,.28),rgba(255,255,255,.07));border:3px solid rgba(255,255,255,.55);z-index:6;touch-action:none}
+#joyKnob{position:absolute;left:50%;top:50%;width:64px;height:64px;margin:-32px;border-radius:50%;background:radial-gradient(#fff,#9fc0f0);border:2px solid #fff;opacity:.85;pointer-events:none}
+#pad{display:none;position:absolute;right:0;bottom:0;width:260px;height:260px;z-index:6;pointer-events:none}
+.pb{position:absolute;border-radius:50%;border:3px solid rgba(255,255,255,.85);color:#fff;font-weight:bold;display:flex;flex-direction:column;align-items:center;justify-content:center;text-shadow:0 1px 2px #000;box-shadow:0 2px 6px rgba(0,0,0,.5),inset 0 0 12px rgba(255,255,255,.35);opacity:.92;touch-action:none;pointer-events:auto;cursor:pointer}
+.pb small{font-size:11px;min-height:12px}.pb.dis{opacity:.4;filter:grayscale(.6)}.pb:active{transform:scale(.92)}
+.touch.ingame #joy,.touch.ingame #pad{display:block}
+.touch #hotbar{display:none}
+.touch #log{left:196px;bottom:8px;width:330px;height:66px}
 </style>
 </head>
 <body>
@@ -91,6 +100,8 @@ table.st td{padding:1px 3px;border-bottom:1px dotted #b8c4dd}
 </div>
 <div id="log"></div>
 <div id="hotbar"></div>
+<div id="joy"><div id="joyKnob"></div></div>
+<div id="pad"></div>
 <div id="help">左鍵：點地面移動／點怪物自動攻擊／點NPC對話／點掉落物撿取<br>1~3 技能　4~7 藥水　A 狀態　E 裝備　I 背包　S 技能　F 自動戰鬥　ESC 關閉視窗</div>
 
 <div id="status" class="win" style="left:20px;top:110px;width:220px"><div class="tb"><span>狀態</span><b class="x">×</b></div><div class="bd" id="statusBody"></div></div>
@@ -134,11 +145,11 @@ const SAVEKEY='pixel_swordsman_rpg_v1';
 /* ================= 地圖 ================= */
 const MW=40,MH=48,OX=MH*32+64,OY=170;
 const sx=(x,y)=>(x-y)*32+OX, sy=(x,y)=>(x+y)*16+OY;
-const gnd=new Uint8Array(MW*MH),blk=new Uint8Array(MW*MH);
-const statics=[];
+let gnd,blk,statics;const MAPS={};let CUR='field';
+function newGrids(){gnd=new Uint8Array(MW*MH);blk=new Uint8Array(MW*MH);statics=[];}
 function roadCx(j){return 19.5+Math.sin(j*0.28)*2.2;}
 const walk=(i,j)=>i>=0&&j>=0&&i<MW&&j>=0&&j<MH&&!blk[j*MW+i];
-const NPCS=[
+const ALLNPCS=[
  {name:'治療師',role:'heal',x:18,y:4,look:{hair:'#f2d27a',armor:{c:'#f4f4f8',trim:'#d8b030'},garment:{c:'#dcdcf4'},shoes:{c:'#c8c8d8'},headUp:{k:'band',c:'#d8b030'}}},
  {name:'轉職官',role:'job',x:22,y:4,look:{hair:'#3a3a44',knight:true,armor:{c:'#2f56b0',trim:'#e6c040'},weapon:{blade:'#e8ecf4',hilt:'#c9a227',len:12},shield:{c:'#2f56b0',rim:'#e6c040',shape:'kite'},headUp:{k:'plume',c:'#d8dfe8',p:'#d03030'},garment:{c:'#c03030'},shoes:{c:'#8e9aaa'}}},
  {name:'道具商',role:'shopI',x:14,y:5,look:{hair:'#a0602a',armor:{c:'#5a9a4a',trim:'#e8e0c8'},headUp:{k:'cap',c:'#c8a040'},shoes:{c:'#6a4528'}}},
@@ -147,7 +158,15 @@ const NPCS=[
  {name:'城門衛兵',role:'guard',x:17,y:2,look:{hair:'#444',knight:true,armor:{c:'#c9d3de',trim:'#5a7ab0'},weapon:{blade:'#e6edf5',hilt:'#c9a227',len:12},shield:{c:'#aab4c0',rim:'#556',shape:'round'},headUp:{k:'helm',c:'#b8c4d2'},shoes:{c:'#8e9aaa'}}},
  {name:'城門衛兵',role:'guard',x:22,y:2,look:{hair:'#444',knight:true,armor:{c:'#c9d3de',trim:'#5a7ab0'},weapon:{blade:'#e6edf5',hilt:'#c9a227',len:12},shield:{c:'#aab4c0',rim:'#556',shape:'round'},headUp:{k:'helm',c:'#b8c4d2'},shoes:{c:'#8e9aaa'}}}
 ];
-(function buildMap(){
+const TP=[[11,13],[27,13],[10,22],[28,22],[19,12],[17,30],[22,30]];
+ALLNPCS.forEach((n,k)=>{n.x=TP[k][0];n.y=TP[k][1];n.map='town';});
+let NPCS=[];
+function finishMap(name,title){statics.forEach(s=>{s.depth=s.depth0||s.i+s.j+1;});statics.sort((a,b)=>a.depth-b.depth);MAPS[name]={gnd,blk,statics,title};}
+const PORTALS={
+ field:[{i0:17,i1:22,j0:0,j1:0,to:'town',tx:19.5,ty:28.5,label:'往城鎮 ▲'}],
+ town:[{i0:18,i1:21,j0:31,j1:31,to:'field',tx:20.5,ty:2.8,label:'往南門草原 ▼'}]
+};
+function buildField(){newGrids();
  for(let j=0;j<MH;j++)for(let i=0;i<MW;i++){
   let t=0;
   if(j<=8&&i>=12&&i<=27)t=2;
@@ -157,7 +176,7 @@ const NPCS=[
  }
  for(let j=0;j<2;j++)for(let i=0;i<MW;i++){
   const id=j*MW+i;
-  if(i>=17&&i<=22){gnd[id]=2;if(j===0){blk[id]=1;statics.push({i,j,k:'door'});}continue;}
+  if(i>=17&&i<=22){gnd[id]=2;continue;}
   const tower=(i>=15&&i<=16)||(i>=23&&i<=24);
   blk[id]=1;statics.push({i,j,k:tower?'tower':'wall'});
  }
@@ -167,10 +186,38 @@ const NPCS=[
   if(border||(j>=10&&h>0.945)||(j<10&&(i<7||i>32)&&h>0.9)){blk[id]=1;statics.push({i,j,k:'tree',v:Math.floor(hash(j,i)*2)});}
   else if(h>0.86&&h<=0.91)statics.push({i,j,k:'bush'});
  }
- for(const n of NPCS)blk[n.y*MW+n.x]=1;
- statics.forEach(s=>s.depth=s.i+s.j+1);
- statics.sort((a,b)=>a.depth-b.depth);
-})();
+ finishMap('field','南門草原（仿）');
+}
+function buildTown(){
+ newGrids();
+ for(let j=0;j<MH;j++)for(let i=0;i<MW;i++){const inside=i>=8&&i<=31&&j>=8&&j<=31;gnd[j*MW+i]=inside?2:0;blk[j*MW+i]=inside?0:1;}
+ for(let i=7;i<=32;i++)statics.push({i,j:7,k:(i===7||i===32)?'tower':'wall'});
+ for(let j=8;j<=32;j++)statics.push({i:7,j,k:'wall'});
+ for(let j=8;j<=32;j++)statics.push({i:32,j,k:'bld',img:'curb',hh:12});
+ for(let i=8;i<=31;i++)if(i<18||i>21)statics.push({i,j:32,k:'bld',img:'curb',hh:12});
+ const B=[[9,9,5,4,'b_church',11,12,'教堂'],[24,9,7,4,'b_barracks',27,12,'騎士團'],[17,9,5,3,'b_smith',19,11,'鐵匠鋪'],[9,18,4,4,'b_item',10,21,'道具店'],[27,18,4,4,'b_weapon',28,21,'武具店']];
+ for(const[a,b,w,h,img,di,dj,name]of B)for(let j=b;j<b+h;j++)for(let i=a;i<a+w;i++){
+  blk[j*MW+i]=1;const door=(i===di&&j===dj);statics.push({i,j,k:'bld',img:door?'door':img,hh:64,sign:door?name:null});}
+ for(let j=18;j<=21;j++)for(let i=18;i<=21;i++){blk[j*MW+i]=1;statics.push({i,j,k:'bld',img:'basin',hh:14});}
+ statics.push({i:20,j:20,k:'statue',depth0:43.5});
+ [[9,15],[30,15],[9,27],[30,27],[14,25],[25,25],[14,16],[25,16]].forEach(([i,j],n)=>{blk[j*MW+i]=1;statics.push({i,j,k:'tree',v:n%2});});
+ [[13,28],[26,28],[16,14],[23,14],[12,25],[27,25]].forEach(([i,j])=>statics.push({i,j,k:'bush'}));
+ for(const n of ALLNPCS)if(n.map==='town')blk[n.y*MW+n.x]=1;
+ finishMap('town','普隆德拉城鎮（仿）');
+}
+function enterMap(name,x,y,quiet){
+ const M=MAPS[name];if(!M)return;
+ CUR=name;gnd=M.gnd;blk=M.blk;statics=M.statics;
+ if(!M.ground)M.ground=makeGround();imgs.ground=M.ground;
+ NPCS=ALLNPCS.filter(n=>n.map===name);
+ fieldMons.forEach(m=>{m.state='idle';m.angry=false;m.goal=null;});
+ mons=name==='field'?fieldMons:[];
+ drops.length=0;floaters.length=0;
+ P.map=name;P.x=x;P.y=y;P.path=[];P.target=null;P.pending=null;P.goal=null;
+ closeAllWins();setAuto(false);
+ document.getElementById('mapname').textContent=M.title;
+ if(!quiet){log('進入 '+M.title,'#ffe9a0');saveGame();}
+}
 
 /* ---- A* ---- */
 function findPath(si,sj,gi,gj){
@@ -260,7 +307,26 @@ function buildImages(){
   for(let k=0;k<26;k++){const a=hash(k,v+3)*6.28,r=hash(v,k+9)*10;R(Math.round(16+Math.cos(a)*r),Math.round(18+Math.sin(a)*r*1.1),2,2,hash(k+7,v)>0.5?'#2a6024':'#6bbd5a');}
  })));
  imgs.bush=outlineImg(mkSprite(48,32,(R,E)=>{E(12,11,10,5,'#2f6b2a');E(12,10,8,4,'#46963c');E(8,8,3,2,'#6bbd5a');R(15,6,2,2,'#e86a8a');R(7,11,2,2,'#f0e060');}));
- // 地面大圖
+
+ const mk=(H,top,l,r,line)=>mkBlock(H,top,l,r,line,false,true);
+ imgs.b_church=mk(64,'#4f78c4','#f4f1e8','#d6d2c6','#b9b5a8');
+ imgs.b_barracks=mk(64,'#b84040','#a8b0bc','#868e9c','#6a7280');
+ imgs.b_smith=mk(64,'#d8803a','#7a7a86','#5e5e6a','#44444e');
+ imgs.b_item=mk(64,'#4aa050','#ecdcb4','#cfbf98','#b4a47c');
+ imgs.b_weapon=mk(64,'#8a5a2a','#b4684a','#92503a','#6e3a28');
+ imgs.curb=mk(12,'#d0cab8','#b8b2a2','#948e80','#76715f');
+ imgs.basin=mk(14,'#6fb0f0','#b8b2a2','#948e80','#76715f');
+ imgs.statue=outlineImg(mkSprite(64,120,(R,E)=>{
+  R(6,52,20,4,'#bdb8aa');R(8,48,16,4,'#d4d0c2');R(12,36,8,12,'#dcd8cc');R(12,36,2,12,'#bcb8aa');R(10,33,12,3,'#d4d0c2');
+  R(4,12,9,3,'#fff');R(2,15,11,3,'#eceae4');R(3,18,10,3,'#fff');R(5,21,8,3,'#e4e2dc');R(8,9,5,3,'#fff');
+  R(19,12,9,3,'#fff');R(19,15,11,3,'#eceae4');R(19,18,10,3,'#fff');R(19,21,8,3,'#e4e2dc');R(19,9,5,3,'#fff');
+  R(13,16,6,10,'#f6f4f0');R(12,24,8,6,'#f6f4f0');R(11,29,10,4,'#f6f4f0');R(11,29,2,4,'#d8d6d0');R(13,16,2,10,'#e2e0da');
+  R(10,18,3,2,'#f4eee4');R(19,18,3,2,'#f4eee4');R(14,21,4,2,'#f4eee4');
+  E(16,12,3,3,'#f4eee4');R(13,9,6,2,'#e6d9a8');R(15,12,1,1,'#555');R(17,12,1,1,'#555');
+  R(13,5,6,1,'#ffe27a');R(12,6,1,1,'#ffe27a');R(19,6,1,1,'#ffe27a');R(13,7,6,1,'#ffe27a');
+ }),'#3a3a44');
+}
+function makeGround(){
  const gc=document.createElement('canvas');gc.width=OX+MW*32+96;gc.height=(MW+MH)*16+OY+64;const x=gc.getContext('2d');
  for(let j=0;j<MH;j++)for(let i=0;i<MW;i++){
   const k=gnd[j*MW+i],v=Math.floor(hash(i,j)*4);
@@ -277,7 +343,7 @@ function buildImages(){
   for(let n=0;n<3;n++){const u=0.2+hash(i+n,j*5)*0.6,v=0.2+hash(i*5,j+n)*0.6;
    x.fillStyle=fc[Math.floor(hash(i+n*9,j+n*4)*4)];x.fillRect(Math.round(sx(i+u,j+v)),Math.round(sy(i+u,j+v)),2,2);}
  }
- imgs.ground=gc;
+ return gc;
 }
 
 /* ================= 物品資料 ================= */
@@ -408,7 +474,7 @@ const MON={
  ,cake:{n:'蛋糕怪',lv:10,hp:430,atk:[34,50],def:9,flee:26,hit:62,exp:170,spd:1.2,aspd:1400,aggr:false,sp:'cake',b:'#8fbf4a',d:'#4a7a26',h:'#f6f2e0',hb:[52,48],rs:10,loot:[['crumb',.55],['rpot',.15],['opot',.08],['h_helm',.015],['a_chain',.01],['c_cake',.02]]}
 };
 const SPAWNS=[['dew',16,[3,10,36,28]],['beetle',14,[3,16,36,36]],['mouse',12,[3,22,36,44]],['boar',10,[3,26,36,44]],['cake',8,[3,28,36,44]]];
-const mons=[];let monId=0;
+const fieldMons=[];let mons=fieldMons;let monId=0;
 const AUTO={on:false,next:0,hp:50,bash:true,sel:{}};
 Object.keys(MON).forEach(k=>AUTO.sel[k]=true);
 try{const a=JSON.parse(localStorage.getItem('pixel_swordsman_auto')||'null');if(a){AUTO.hp=a.hp??50;AUTO.bash=a.bash!==false;for(const k in a.sel||{})if(k in AUTO.sel)AUTO.sel[k]=!!a.sel[k];}}catch(e){}
@@ -435,7 +501,7 @@ function renderAuto(){
 }
 
 function spawnPos(z){for(let n=0;n<80;n++){const x=ri(z[0],z[2]),y=ri(z[1],z[3]);if(walk(x,y)&&y>=9)return[x+0.5,y+0.5];}return[20.5,20.5];}
-function initMonsters(){mons.length=0;for(const[t,n,z]of SPAWNS)for(let k=0;k<n;k++){const p=spawnPos(z),d=MON[t];mons.push({id:monId++,type:t,x:p[0],y:p[1],sx0:p[0],sy0:p[1],z,hp:d.hp,dead:false,state:'idle',angry:false,nextAtk:0,wanderAt:NOW+rnd(0,4000),goal:null,flash:0,stun:0,flip:false,atkAnim:0,prov:null});}}
+function initMonsters(){fieldMons.length=0;for(const[t,n,z]of SPAWNS)for(let k=0;k<n;k++){const p=spawnPos(z),d=MON[t];fieldMons.push({id:monId++,type:t,x:p[0],y:p[1],sx0:p[0],sy0:p[1],z,hp:d.hp,dead:false,state:'idle',angry:false,nextAtk:0,wanderAt:NOW+rnd(0,4000),goal:null,flash:0,stun:0,flip:false,atkAnim:0,prov:null});}}
 
 /* ================= 玩家 ================= */
 let P=null,uidSeed=1;
@@ -449,7 +515,7 @@ const SK={
 const EQSLOTS=['headUp','headMid','headLow','armor','weapon','shield','garment','shoes','acc1','acc2'];
 function mkEquip(id){return{id,refine:0,cards:[]};}
 function newPlayer(name){
- const p={name,job:'sword',lv:1,exp:0,zeny:500,stats:{str:1,agi:1,vit:1,int:1,dex:1,luk:1},stPts:48,skPts:0,sk:{bash:1,prov:1,recov:1,charge:0},hp:1,sp:1,inv:[],equip:{},x:20.5,y:5.5};
+ const p={name,job:'sword',lv:1,exp:0,zeny:500,stats:{str:1,agi:1,vit:1,int:1,dex:1,luk:1},stPts:48,skPts:0,sk:{bash:1,prov:1,recov:1,charge:0},hp:1,sp:1,inv:[],equip:{},x:19.5,y:27.5,map:'town'};
  EQSLOTS.forEach(s=>p.equip[s]=null);
  p.equip.weapon=mkEquip('w_dagger');p.equip.armor=mkEquip('a_shirt');
  p.inv.push({id:'rpot',count:10});
@@ -580,8 +646,8 @@ function playerDie(){
  log('你倒下了……','#f66');$('death').style.display='flex';closeAllWins();
 }
 function respawn(){
- P.dead=false;P.x=20.5;P.y=5.5;P.hp=Math.ceil(P.d.maxhp*0.5);P.exp=Math.max(0,P.exp-Math.floor(needExp(P.lv)*0.05));
- $('death').style.display='none';log('在普隆德拉城門重生了。');saveGame(true);refreshUI();
+ P.dead=false;enterMap('town',19.5,27.5,true);P.hp=Math.ceil(P.d.maxhp*0.5);P.exp=Math.max(0,P.exp-Math.floor(needExp(P.lv)*0.05));
+ $('death').style.display='none';log('在城鎮重生了。');saveGame(true);refreshUI();
 }
 function monAttack(m){
  const t=MON[m.type],md=monDef(m);m.nextAtk=NOW+t.aspd;m.atkAnim=NOW;
@@ -636,7 +702,7 @@ function openNPC(n){
  else if(n.role==='shopI'){openDlg(n.name,'歡迎光臨！藥水、補給品，通通有。',[['購買 / 賣出',()=>{showWin('dlg',false);openShop(['rpot','opot','wpot','bpot'],'道具商');}],close]);}
  else if(n.role==='shopE'){openDlg(n.name,'要買新的裝備嗎？也收購你不需要的東西。',[['購買 / 賣出',()=>{showWin('dlg',false);openShop(['w_dagger','w_sword','w_spear2','a_shirt','a_leather','s_wood','h_band','h_cap','m_glass','l_mask','l_scarf','g_cloth','sh_sandal','sh_boot'],'武具商');}],close]);}
  else if(n.role==='smith')openDlg(n.name,'把裝備交給我，我能讓它更強。但失敗的話……裝備就會碎掉，這點要有覺悟。',[['精煉裝備',()=>{showWin('dlg',false);showWin('refine',true);}],['購買礦石 / 賣出',()=>{showWin('dlg',false);openShop(['ore1','ore2'],'精煉師');}],close]);
- else openDlg(n.name,'這裡是王都南門，請注意草原上的魔物！往南走越深處越危險。',[close]);
+ else openDlg(n.name,'這裡是城鎮的南邊出口，往南就是魔物出沒的草原。越往南走越危險，請小心！',[close]);
 }
 function openShop(stock,title){shopStock=stock;shopTab='buy';$('shopTitle').textContent=title;showWin('shop',true);}
 
@@ -644,7 +710,7 @@ function openShop(stock,title){shopStock=stock;shopTab='buy';$('shopTitle').text
 function saveGame(manual){
  if(!P)return;
  try{
-  localStorage.setItem(SAVEKEY,JSON.stringify({v:1,name:P.name,job:P.job,lv:P.lv,exp:P.exp,zeny:P.zeny,stats:P.stats,stPts:P.stPts,skPts:P.skPts,sk:P.sk,hp:Math.max(1,P.hp),sp:P.sp,inv:P.inv,equip:P.equip,x:P.x,y:P.y,gotSpear:P.gotSpear}));
+  localStorage.setItem(SAVEKEY,JSON.stringify({v:1,name:P.name,job:P.job,lv:P.lv,exp:P.exp,zeny:P.zeny,stats:P.stats,stPts:P.stPts,skPts:P.skPts,sk:P.sk,hp:Math.max(1,P.hp),sp:P.sp,inv:P.inv,equip:P.equip,x:P.x,y:P.y,gotSpear:P.gotSpear,map:CUR}));
   if(manual)log('存檔完成。','#9fe8a0');
  }catch(e){log('存檔失敗（瀏覽器不允許儲存）','#f99');}
 }
@@ -652,7 +718,7 @@ function loadGame(){
  try{
   const s=JSON.parse(localStorage.getItem(SAVEKEY)||'null');if(!s)return false;
   const p=newPlayer(s.name);
-  Object.assign(p,{job:s.job,lv:s.lv,exp:s.exp,zeny:s.zeny,stats:s.stats,stPts:s.stPts,skPts:s.skPts,sk:Object.assign(p.sk,s.sk),hp:s.hp,sp:s.sp,x:s.x,y:s.y,gotSpear:s.gotSpear});
+  Object.assign(p,{job:s.job,lv:s.lv,exp:s.exp,zeny:s.zeny,stats:s.stats,stPts:s.stPts,skPts:s.skPts,sk:Object.assign(p.sk,s.sk),hp:s.hp,sp:s.sp,x:s.x,y:s.y,gotSpear:s.gotSpear,map:s.map||'field'});
   const ok=it=>it&&ITEMS[it.id];
   p.inv=(s.inv||[]).filter(ok);EQSLOTS.forEach(k=>{p.equip[k]=ok(s.equip[k])?s.equip[k]:null;});
   P=p;return true;
@@ -682,13 +748,13 @@ cv.addEventListener('touchmove',e=>{e.preventDefault();tdisp('mousemove',e.chang
 cv.addEventListener('mousedown',e=>{
  if(e.button!==0||!P||P.dead)return;
  const m=mpos(e),h=pick(m.x,m.y);
- if(AUTO.on&&h.kind!=='mon')setAuto(false);
+ if(AUTO.on&&h.kind!=='mon'&&!(TOUCH&&h.kind==='ground'))setAuto(false);
  if(h.kind==='mon'){P.target=h.ref;P.pending=null;P.goal=null;P.repathAt=0;}
  else if(h.kind==='drop'){P.target=null;P.pending=null;P.goal={k:'drop',ref:h.ref};const p=findPath(Math.floor(P.x),Math.floor(P.y),Math.floor(h.ref.x),Math.floor(h.ref.y));P.path=p||[];}
  else if(h.kind==='npc'){P.target=null;P.pending=null;P.goal={k:'npc',ref:h.ref};
   let best=null,bd=1e9;for(let dx=-1;dx<=1;dx++)for(let dy=-1;dy<=1;dy++){const i=h.ref.x+dx,j=h.ref.y+dy;if((dx||dy)&&walk(i,j)){const d=Math.hypot(i+0.5-P.x,j+0.5-P.y);if(d<bd){bd=d;best=[i,j];}}}
   P.path=best?(findPath(Math.floor(P.x),Math.floor(P.y),best[0],best[1])||[]):[];}
- else{P.target=null;P.pending=null;P.goal=null;const p=findPath(Math.floor(P.x),Math.floor(P.y),Math.floor(h.x),Math.floor(h.y));if(p)P.path=p;}
+ else if(!TOUCH){P.target=null;P.pending=null;P.goal=null;const p=findPath(Math.floor(P.x),Math.floor(P.y),Math.floor(h.x),Math.floor(h.y));if(p)P.path=p;}
 });
 addEventListener('keydown',e=>{
  if(e.key==='Escape'){let top=null,z=-1;WINS.forEach(id=>{const w=$(id);if(w.style.display==='block'){const zz=+w.style.zIndex||0;if(zz>=z){z=zz;top=w;}}});if(top){top.style.display='none';hideTip();}e.preventDefault();return;}
@@ -874,6 +940,7 @@ function updateHUD(){
  $('hudZ').textContent=`Zeny：${P.zeny.toLocaleString()}`+(P.stPts?`　屬性點 ${P.stPts}`:'')+(P.skPts?`　技能點 ${P.skPts}`:'');
  HB.forEach(h=>{if(h.sk){const L=P.sk[h.sk],lock=SK[h.sk].knight&&P.job!=='knight';h.el.classList.toggle('dis',!L||lock||P.sp<(SK[h.sk].cost?SK[h.sk].cost(L||1):0));}
   else{const n=countItem(h.it);h.el.querySelector('.c').textContent=n;h.el.classList.toggle('dis',!n);}});
+ updatePad();
 }
 
 /* ================= 角色繪製（像素） ================= */
@@ -1023,7 +1090,7 @@ function updPlayer(dt){
   const t2=P.target,dd=Math.hypot(P.x-t2.x,P.y-t2.y),rng=P.pending?Math.max(SK[P.pending.id].range,atkRange()):atkRange();
   const dx=t2.x-P.x,dy=t2.y-P.y;P.front=(dx+dy)>=0;P.mirror=(dx-dy)<0;
   if(dd<=rng){P.path=[];if(NOW>=P.nextAtk){if(P.pending)castSkill(P.pending.id,t2);else normalAttack(t2);}}
-  else if(NOW>=P.repathAt){P.repathAt=NOW+300;P.path=findPath(Math.floor(P.x),Math.floor(P.y),Math.floor(t2.x),Math.floor(t2.y))||[];}
+  else if(NOW>=P.repathAt&&!joyOn()){P.repathAt=NOW+300;P.path=findPath(Math.floor(P.x),Math.floor(P.y),Math.floor(t2.x),Math.floor(t2.y))||[];}
  }
  if(P.goal){
   const g=P.goal;
@@ -1037,7 +1104,18 @@ function updPlayer(dt){
   P.moving=true;
   if(d<=step){P.x=tx;P.y=ty;P.path.shift();step-=d;}else{P.x+=dx/d*step;P.y+=dy/d*step;step=0;}
  }
+ if(joyOn()){
+  if(AUTO.on)setAuto(false);
+  P.path=[];P.goal=null;P.pending=P.pending;
+  const jm=Math.min(1,Math.hypot(JOY.x,JOY.y)),di=(JOY.x/32+JOY.y/16)/2,dj=(JOY.y/16-JOY.x/32)/2,dl=Math.hypot(di,dj)||1,vx=di/dl,vy=dj/dl,st=4.6*dt*jm;
+  const nx=P.x+vx*st,ny=P.y+vy*st;
+  if(walk(Math.floor(nx),Math.floor(P.y)))P.x=nx;
+  if(walk(Math.floor(P.x),Math.floor(ny)))P.y=ny;
+  P.front=(vx+vy)>=0;P.mirror=(vx-vy)<0;P.moving=true;
+ }
  if(P.moving)P.phase+=dt*8;
+ const pi=Math.floor(P.x),pj=Math.floor(P.y);
+ for(const pt of (PORTALS[CUR]||[]))if(pi>=pt.i0&&pi<=pt.i1&&pj>=pt.j0&&pj<=pt.j1){enterMap(pt.to,pt.tx,pt.ty);break;}
 }
 function update(dt){
  if(!P)return;
@@ -1062,6 +1140,12 @@ function render(){
  // 滑鼠格子
  if(hover&&hover.kind==='ground'){const i=Math.floor(hover.x),j=Math.floor(hover.y);if(walk(i,j)){const cx=sx(i+0.5,j+0.5)-cam.x,cy=sy(i+0.5,j+0.5)-cam.y;G.strokeStyle='rgba(255,255,255,.7)';G.lineWidth=2;G.beginPath();G.moveTo(cx,cy-16);G.lineTo(cx+32,cy);G.lineTo(cx,cy+16);G.lineTo(cx-32,cy);G.closePath();G.stroke();}}
  if(P.target&&!P.target.dead){const m=P.target,cx=sx(m.x,m.y)-cam.x,cy=sy(m.x,m.y)-cam.y;G.strokeStyle='rgba(255,80,80,.9)';G.lineWidth=2;G.beginPath();G.ellipse(cx,cy,22*(MON[m.type].sz||1)*0.8,10*(MON[m.type].sz||1)*0.8,0,0,7);G.stroke();}
+ const portalLabels=[];
+ for(const pt of (PORTALS[CUR]||[])){
+  for(let j=pt.j0;j<=pt.j1;j++)for(let i=pt.i0;i<=pt.i1;i++){const cx=sx(i+0.5,j+0.5)-cam.x,cy=sy(i+0.5,j+0.5)-cam.y;
+   G.fillStyle=`rgba(120,200,255,${0.28+0.16*Math.sin(NOW/300)})`;G.beginPath();G.moveTo(cx,cy-16);G.lineTo(cx+32,cy);G.lineTo(cx,cy+16);G.lineTo(cx-32,cy);G.closePath();G.fill();}
+  portalLabels.push({t:pt.label,x:sx((pt.i0+pt.i1+1)/2,pt.j0+0.5)-cam.x,y:sy((pt.i0+pt.i1+1)/2,pt.j0+0.5)-cam.y-22});
+ }
  // 收集繪製物
  const list=[];
  for(const s of statics){const cx=sx(s.i+0.5,s.j+0.5)-cam.x,cy=sy(s.i+0.5,s.j+0.5)-cam.y;if(cx<-90||cx>W+90||cy<-60||cy>H+260)continue;list.push({d:s.depth,k:'s',s,cx,cy});}
@@ -1070,9 +1154,12 @@ function render(){
  for(const dr of drops){const cx=sx(dr.x,dr.y)-cam.x,cy=sy(dr.x,dr.y)-cam.y;list.push({d:dr.x+dr.y,k:'d',dr,cx,cy});}
  list.push({d:P.x+P.y,k:'p',cx:tx-cam.x,cy:ty-cam.y});
  list.sort((a,b)=>a.d-b.d);
+ const signs=[];
  for(const o of list){
-  if(o.k==='s'){const s=o.s;
-   if(s.k==='wall')G.drawImage(imgs.wall,o.cx-32,o.cy-16-56);else if(s.k==='tower')G.drawImage(imgs.tower,o.cx-32,o.cy-16-120);else if(s.k==='door')G.drawImage(imgs.door,o.cx-32,o.cy-16-64);
+  if(o.k==='s'){const s=o.s;if(s.sign)signs.push({t:s.sign,x:o.cx,y:o.cy-16-s.hh-8});
+   if(s.k==='wall')G.drawImage(imgs.wall,o.cx-32,o.cy-16-56);else if(s.k==='tower')G.drawImage(imgs.tower,o.cx-32,o.cy-16-120);else if(s.k==='statue'){G.drawImage(imgs.statue,o.cx-32,o.cy-16-122);
+    for(let k=0;k<8;k++){const t=(NOW/1000+k/8)%1,a=k*Math.PI/4,r=t*26;G.fillStyle=`rgba(210,238,255,${0.9-t*0.6})`;G.fillRect(Math.round(o.cx+Math.cos(a)*r)-1,Math.round(o.cy-16-52-Math.sin(t*Math.PI)*24+Math.sin(a)*r*0.5),3,3);}}
+   else if(s.k==='bld')G.drawImage(imgs[s.img],o.cx-32,o.cy-16-s.hh);
    else if(s.k==='tree')G.drawImage(imgs.tree[s.v],o.cx-32,o.cy+4-88);else G.drawImage(imgs.bush,o.cx-24,o.cy+4-26);}
   else if(o.k==='m')drawMon(o.m,o.cx,o.cy);
   else if(o.k==='n'){const n=o.n;spriteHuman(o.cx,o.cy+4,n.look,{front:true,mirror:n.x>20,phase:0,moving:false,atk:-1});}
@@ -1084,6 +1171,8 @@ function render(){
  // 名稱與血條
  for(const n of NPCS){const cx=sx(n.x+0.5,n.y+0.5)-cam.x,cy=sy(n.x+0.5,n.y+0.5)-cam.y;if(cx<-80||cx>W+80||cy<0||cy>H+60)continue;label(n.name,cx,cy-56,n.role==='guard'?'#cfe':'#ffe9a0');}
  label(P.name,tx-cam.x,ty-cam.y-68,'#fff');
+ for(const sg of signs)label(sg.t,sg.x,sg.y,'#ffe9a0');
+ for(const pl of portalLabels)label(pl.t,pl.x,pl.y,'#aef');
  for(const m of mons){if(m.dead)continue;const t=MON[m.type],s=t.sz||1,cx=sx(m.x,m.y)-cam.x,cy=sy(m.x,m.y)-cam.y;if(cx<-80||cx>W+80||cy<0||cy>H+60)continue;
   const top=cy-t.hb[1]*s*(s>1?0.8:1)-8;
   if(P.target===m||m.hp<t.hp||(hover&&hover.ref===m)){G.fillStyle='#000';G.fillRect(cx-22,top,44,6);G.fillStyle='#e04040';G.fillRect(cx-21,top+1,Math.max(0,42*m.hp/t.hp),4);}
@@ -1114,8 +1203,8 @@ function fit(){
 }
 addEventListener('resize',fit);addEventListener('orientationchange',()=>setTimeout(fit,250));fit();
 function startGame(){
- initRuntime();initMonsters();buildHotbar();$('title').style.display='none';gameOn=true;
- log('歡迎來到普隆德拉南門！點擊地面移動，點擊怪物自動攻擊。','#ffe9a0');
+ initRuntime();{const m0=P.map||'field',x0=P.x,y0=P.y;enterMap('field',x0,y0,true);initMonsters();enterMap(m0,x0,y0,true);}buildHotbar();buildPad();document.body.classList.add('ingame');$('title').style.display='none';gameOn=true;
+ log('歡迎來到城鎮！從南邊出口前往草原。點擊地面移動，點擊怪物自動攻擊。','#ffe9a0');
  log('草原上有露珠精、葉甲蟲、月影鼠。擊倒怪物可能掉落裝備與卡片，按 ESC 可關閉視窗。');
  if(P.job==='knight'&&!P.gotSpear&&P.inv.length<MAXINV){giveItem('w_spear',1);P.gotSpear=true;log('補發轉職禮物：基礎長槍','#ffe9a0');}
  refreshUI();showWin('status',false);
@@ -1126,6 +1215,30 @@ $('newBtn').onclick=()=>{const nm=($('nameIn').value||'劍士').trim().slice(0,1
 $('contBtn').onclick=()=>{if(loadGame())startGame();else $('titleMsg').textContent='找不到存檔。';};
 addEventListener('beforeunload',()=>{if(gameOn&&!P.dead)saveGame();});
 try{if(!localStorage.getItem(SAVEKEY))$('contBtn').disabled=true;else{const s=JSON.parse(localStorage.getItem(SAVEKEY));$('titleMsg').textContent=`存檔：${s.name}　${s.job==='knight'?'騎士':'劍士'} Lv${s.lv}`;$('nameIn').value=s.name;}}catch(e){$('contBtn').disabled=true;}
+const JOY={id:null,x:0,y:0};
+const JOYC={x:34+75,y:H-26-75,r:75};
+const joyOn=()=>TOUCH&&JOY.id!==null&&Math.hypot(JOY.x,JOY.y)>0.2;
+function joyUpd(e){const lp=toLocal(e.clientX,e.clientY);let dx=lp.x-JOYC.x,dy=lp.y-JOYC.y;const l=Math.hypot(dx,dy);if(l>JOYC.r){dx*=JOYC.r/l;dy*=JOYC.r/l;}
+ JOY.x=dx/JOYC.r;JOY.y=dy/JOYC.r;$('joyKnob').style.transform=`translate(${dx}px,${dy}px)`;}
+function joyEnd(){JOY.id=null;JOY.x=JOY.y=0;$('joyKnob').style.transform='translate(0,0)';}
+$('joy').addEventListener('pointerdown',e=>{e.preventDefault();JOY.id=e.pointerId;try{$('joy').setPointerCapture(e.pointerId);}catch(_){}joyUpd(e);});
+addEventListener('pointermove',e=>{if(e.pointerId===JOY.id)joyUpd(e);});
+addEventListener('pointerup',e=>{if(e.pointerId===JOY.id)joyEnd();});
+addEventListener('pointercancel',e=>{if(e.pointerId===JOY.id)joyEnd();});
+const PADS=[{k:'bash',r:28,b:28,s:82,t:'重擊',c:'#d05030'},{k:'prov',r:124,b:30,s:64,t:'挑釁',c:'#c0a020'},{k:'charge',r:110,b:108,s:64,t:'衝鋒',c:'#3a60d0'},{k:'pot',r:28,b:118,s:64,t:'藥水',c:'#d84040'}];
+function buildPad(){const pd=$('pad');pd.innerHTML='';PADS.forEach(o=>{const d=document.createElement('div');d.className='pb';
+ d.style.cssText=`right:${o.r}px;bottom:${o.b}px;width:${o.s}px;height:${o.s}px;background:${o.c};font-size:${o.s>70?20:16}px`;
+ d.innerHTML=`<span>${o.t}</span><small class="pc"></small>`;d.onpointerdown=e=>{e.preventDefault();e.stopPropagation();padUse(o);};o.el=d;pd.appendChild(d);});}
+function padUse(o){
+ if(!P||P.dead)return;
+ if(o.k==='pot'){const it=['rpot','opot','wpot'].map(id=>P.inv.find(e=>e.id===id)).find(Boolean);if(it)useItem(it);else log('沒有藥水');return;}
+ if(!(P.target&&!P.target.dead)){let best=null,bd=7;for(const m of mons){if(m.dead)continue;const d=Math.hypot(m.x-P.x,m.y-P.y);if(d<bd){bd=d;best=m;}}if(best)P.target=best;}
+ useSkill(o.k);
+}
+function updatePad(){if(!P)return;PADS.forEach(o=>{if(!o.el)return;
+ if(o.k==='pot'){const n=['rpot','opot','wpot'].reduce((a,id)=>a+countItem(id),0);o.el.querySelector('.pc').textContent=n;o.el.classList.toggle('dis',!n);}
+ else{const L=P.sk[o.k],sk=SK[o.k],lock=sk.knight&&P.job!=='knight';o.el.classList.toggle('dis',!L||lock||P.sp<sk.cost(L||1)||!!(P.cd[o.k]&&NOW<P.cd[o.k]));}});}
+buildTown();buildField();
 buildImages();
 requestAnimationFrame(frame);
 </script>
