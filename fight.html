@@ -213,6 +213,8 @@ button{font-family:inherit;color:inherit;touch-action:manipulation;cursor:pointe
         </ul>
       </div>
       <div class="panel bankinfo" id="bankinfo">題庫載入中…</div>
+      <div class="panel bankinfo hidden" id="resumeBox"></div>
+      <button class="btn hidden" id="continueBtn">繼續冒險</button>
       <button class="btn" id="startBtn" disabled>開始冒險</button>
     </div>
   </section>
@@ -335,6 +337,35 @@ function refillDeck(){
   const d = shuffle(BANK.questions.map((_, i) => i));
   if(d.length > 1 && d[d.length-1] === G.lastQ){ const j = Math.floor(Math.random()*(d.length-1)); [d[d.length-1], d[j]] = [d[j], d[d.length-1]]; }
   G.deck = d;
+}
+
+/* ================= 自動存檔 ================= */
+const SAVE_KEY = 'tihai-expedition-save-v1';
+let storageOk = true;
+function saveGame(){
+  if(!G || G.ended || !G.cur) return;
+  try{
+    const id = i => BANK.questions[i].id;
+    localStorage.setItem(SAVE_KEY, JSON.stringify({
+      v: 1, t: Date.now(), hp: G.hp, stage: G.stage, enemyHp: G.enemyHp, streak: G.streak, maxStreak: G.maxStreak,
+      round: G.round, total: G.total, correct: G.correct, wrong: G.wrong,
+      wrongLog: G.wrongLog.map(w => ({ id: id(w.qi), picked: w.picked })),
+      stageStats: G.stageStats, curStats: G.curStats, deck: G.deck.map(id), cur: G.cur.id, reshuffles: G.reshuffles
+    }));
+  }catch(e){ storageOk = false; }
+}
+function clearSave(){ try{ localStorage.removeItem(SAVE_KEY); }catch(e){} }
+function readSave(){
+  try{
+    const s = JSON.parse(localStorage.getItem(SAVE_KEY) || 'null');
+    if(!s || s.v !== 1 || !Array.isArray(s.deck)) return null;
+    if(!(s.stage >= 0 && s.stage < CFG.enemies.length) || !(s.hp > 0) || !(s.enemyHp > 0)) return null;
+    return s;
+  }catch(e){ return null; }
+}
+function checkStorage(){
+  try{ localStorage.setItem('tihai-test', '1'); localStorage.removeItem('tihai-test'); storageOk = true; }
+  catch(e){ storageOk = false; }
 }
 
 /* ================= 畫面切換 ================= */
@@ -477,15 +508,19 @@ async function healHero(n){
   floatText(hp.x, hp.y - hp.h*0.2, '+' + n, 'heal');
   await anim(hero, [{filter:'none'},{filter:'brightness(1.8) drop-shadow(0 0 12px #6bff9a)',offset:.4},{filter:'none'}], {duration:700});
 }
+function showEnemy(){
+  const e = CFG.enemies[G.stage];
+  $('#enemyImg').src = IMG[e.img];
+  $('#enemyImg').style.setProperty('--es', e.scale);
+  $('#eName').textContent = e.name;
+  setBar($('#eBar'), $('#eHp'), G.enemyHp, G.enemyMax);
+  $('#enemyWrap').style.opacity = '1';
+}
 async function spawnEnemy(){
   const e = CFG.enemies[G.stage];
   G.enemyMax = e.hp; G.enemyHp = e.hp;
   const foe = $('#enemyWrap');
-  $('#enemyImg').src = IMG[e.img];
-  $('#enemyImg').style.setProperty('--es', e.scale);
-  $('#eName').textContent = e.name;
-  setBar($('#eBar'), $('#eHp'), e.hp, e.hp);
-  foe.style.opacity = '1';
+  showEnemy();
   await anim(foe, [{transform:'translateX(-70%)',opacity:0},{transform:'translateX(0)',opacity:1}], {duration:520, easing:'ease-out'});
 }
 
@@ -507,6 +542,7 @@ function renderQuestion(q){
   });
   $('#nextBtn').classList.add('hidden'); $('#infoTx').classList.remove('hidden');
   updateChips(); updateInfo();
+  saveGame();
 }
 
 async function nextRound(){
@@ -659,7 +695,7 @@ function reviewNode(){
 
 /* ================= 結算 ================= */
 function finish(kind){
-  G.ended = true;
+  G.ended = true; clearSave();
   const w = $('#resultWrap'); w.innerHTML = '';
   const title = kind === 'win' ? '🏆 挑戰成功！' : kind === 'lose' ? '💀 戰敗…' : '📚 冒險結束';
   w.appendChild(el('h1', kind === 'win' ? 'win' : 'lose', title));
@@ -695,35 +731,92 @@ function finish(kind){
   w.appendChild(reviewNode());
 
   const b1 = el('button', 'btn', '重新挑戰'); b1.addEventListener('click', startGame);
-  const b2 = el('button', 'btn sub', '回到標題'); b2.addEventListener('click', () => showScreen('start'));
+  const b2 = el('button', 'btn sub', '回到標題'); b2.addEventListener('click', showStart);
   w.appendChild(b1); w.appendChild(b2);
   $('#result').scrollTop = 0;
   showScreen('result');
 }
 
 /* ================= 流程 ================= */
-async function startGame(){
-  if(!BANK || !BANK.questions.length) return;
-  newGame();
+function prepBattleUI(){
   showScreen('battle');
   const hero = $('#heroWrap'); hero.style.opacity = '1'; hero.style.transform = '';
   $('#heroImg').src = IMG.hero;
   setBar($('#pBar'), $('#pHp'), G.hp, CFG.playerMaxHp);
   $('#opts').innerHTML = ''; $('#qtext').textContent = ''; $('#qmeta').innerHTML = ''; $('#feedback').innerHTML = '';
   $('#nextBtn').classList.add('hidden'); $('#infoTx').classList.remove('hidden');
-  G.busy = true;
   updateChips(); updateInfo();
+}
+
+async function startGame(){
+  if(!BANK || !BANK.questions.length) return;
+  newGame();
+  clearSave();
+  prepBattleUI();
+  G.busy = true;
   await spawnEnemy();
   G.busy = false;
   toast('第 1 階段開始！', 1400);
   await nextRound();
 }
 
+async function resumeGame(){
+  const s = readSave();
+  if(!s || !BANK || !BANK.questions.length) return;
+  const idx = new Map(); BANK.questions.forEach((q, i) => { if(!idx.has(q.id)) idx.set(q.id, i); });
+  newGame();
+  G.stage = s.stage;
+  G.enemyMax = CFG.enemies[G.stage].hp;
+  G.enemyHp = Math.min(s.enemyHp, G.enemyMax);
+  G.hp = Math.min(s.hp, CFG.playerMaxHp);
+  G.streak = s.streak | 0; G.maxStreak = s.maxStreak | 0; G.round = s.round | 0;
+  G.total = s.total | 0; G.correct = s.correct | 0; G.wrong = s.wrong | 0; G.reshuffles = s.reshuffles | 0;
+  G.wrongLog = (s.wrongLog || []).filter(w => idx.has(w.id)).map(w => ({ qi: idx.get(w.id), picked: w.picked }));
+  G.stageStats = Array.isArray(s.stageStats) ? s.stageStats : [];
+  G.curStats = Object.assign(newStageStats(), s.curStats || {});
+  G.deck = s.deck.filter(id => idx.has(id)).map(id => idx.get(id));
+  prepBattleUI();
+  showEnemy();
+  toast('已讀取上次的進度', 1500);
+  const ci = idx.get(s.cur);
+  if(ci == null){            // 該題已不在題庫中：改抽下一題
+    G.round--; G.curStats.rounds--;
+    await nextRound();
+    return;
+  }
+  G.lastQ = ci; G.cur = BANK.questions[ci];
+  renderQuestion(G.cur);
+  G.locked = false;
+}
+
 async function pause(){
   if(!G || G.ended) return;
-  const c = await showModal({ title: '暫停', body: '要繼續冒險，還是放棄這次挑戰回到標題？',
-    actions: [{label:'繼續冒險', value:'go'}, {label:'放棄並回到標題', value:'quit', cls:'danger'}] });
-  if(c === 'quit'){ G.ended = true; showScreen('start'); }
+  const c = await showModal({ title: '暫停', body: '進度會自動保存，下次開啟可從標題畫面繼續。',
+    actions: [{label:'繼續冒險', value:'go'}, {label:'回到標題（保留進度）', value:'title', cls:'sub'}, {label:'放棄並刪除進度', value:'quit', cls:'danger'}] });
+  if(c === 'title'){ G.ended = true; showStart(); }
+  else if(c === 'quit'){ G.ended = true; clearSave(); showStart(); }
+}
+
+function showStart(){ showScreen('start'); refreshStart(); }
+function refreshStart(){
+  const s = BANK && BANK.questions.length ? readSave() : null;
+  const box = $('#resumeBox'), cb = $('#continueBtn'), sb = $('#startBtn');
+  box.innerHTML = '';
+  if(s){
+    const e = CFG.enemies[s.stage];
+    const l1 = el('div'); l1.appendChild(el('b', '', '上次進度：')); l1.appendChild(document.createTextNode('第 ' + (s.stage+1) + ' 階段・' + e.name)); box.appendChild(l1);
+    const d = new Date(s.t);
+    const pad = n => String(n).padStart(2, '0');
+    box.appendChild(el('div', '', 'HP ' + s.hp + ' / ' + CFG.playerMaxHp + '　已答 ' + s.total + ' 題　答對 ' + s.correct));
+    box.appendChild(el('div', '', '存檔時間：' + (d.getMonth()+1) + '/' + d.getDate() + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes())));
+    box.classList.remove('hidden'); cb.classList.remove('hidden');
+    sb.textContent = '重新開始'; sb.classList.add('sub');
+  } else {
+    box.classList.add('hidden'); cb.classList.add('hidden');
+    sb.textContent = '開始冒險'; sb.classList.remove('sub');
+  }
+  const old = $('#storeWarn'); if(old) old.remove();
+  if(!storageOk){ const w = el('div', 'warn', '此瀏覽器目前無法使用自動存檔（可能是無痕模式）。'); w.id = 'storeWarn'; $('#bankinfo').appendChild(w); }
 }
 
 function setupStart(){
@@ -736,10 +829,20 @@ function setupStart(){
   if(BANK.skipped) bi.appendChild(el('div', 'warn', '有 ' + BANK.skipped + ' 題格式不正確，已略過。'));
   if(n < 45) bi.appendChild(el('div', 'warn', '題數較少，題庫用完時可選擇重新洗牌續戰（題目會重複）。'));
   $('#startBtn').disabled = !n;
+  checkStorage();
+  refreshStart();
 }
 
 /* ================= 事件 ================= */
-$('#startBtn').addEventListener('click', startGame);
+$('#startBtn').addEventListener('click', async () => {
+  if(readSave()){
+    const c = await showModal({ title: '重新開始？', body: '目前有未完成的冒險，重新開始會覆蓋舊進度。',
+      actions: [{label:'重新開始', value:'new', cls:'danger'}, {label:'取消', value:'no', cls:'sub'}] });
+    if(c !== 'new') return;
+  }
+  startGame();
+});
+$('#continueBtn').addEventListener('click', resumeGame);
 $('#nextBtn').addEventListener('click', onNext);
 $('#pauseBtn').addEventListener('click', pause);
 $('#bookBtn').addEventListener('click', () => { if(G) showModal({ title: '錯題本（本次冒險）', body: reviewNode(), actions: [{label:'關閉', value:'x', cls:'sub'}] }); });
